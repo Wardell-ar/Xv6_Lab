@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -105,7 +106,7 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
+  
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -315,6 +316,7 @@ fork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  np->trace_mask = p->trace_mask;
   return pid;
 }
 
@@ -653,4 +655,17 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int
+proc_count(void) {
+  struct proc *p;
+  int count = 0;
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    if(p->state != UNUSED)
+      count++;
+  }
+
+  return count;
 }
