@@ -297,13 +297,13 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
+/* kernel/vm.c */
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -311,12 +311,20 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
+    // Increment a page's reference count when fork causes a child to share the page, 
+    increment_refcount(PGROUNDDOWN(pa));
+
+    /* just clear PTE_W for page with PTE_W */
+    if (*pte & PTE_W){
+      /* clear PTE_W */
+      *pte &= (~PTE_W);
+      /* set PTE_COW */
+      *pte |= PTE_COW;
+    }
+    
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -326,6 +334,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
+
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
@@ -356,6 +365,11 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
+    if(is_cowpage(pagetable, va0) == 0)
+      // if it is a cowpage, we need a new pa0 pointer to a new memory
+      // and if it is a null pointer, we need return error of -1
+      if ((pa0 = (uint64)cow_alloc(pagetable, va0)) == 0)
+        return -1;
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
